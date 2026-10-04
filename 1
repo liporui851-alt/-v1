@@ -1,17 +1,18 @@
 --!nonstrict
--- Codex Extension — API 配置面板
--- 在主脚本 + 扩展库跑完后执行
+-- Codex Extension Library v2.3 — 带 API 配置弹窗
+-- 在主脚本执行后再跑这个
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 local gui = playerGui:WaitForChild("CodexInterface", 10)
 if not gui then
-    warn("[API] 找不到 CodexInterface")
+    warn("[Ext] 找不到 CodexInterface，先跑主脚本")
     return
 end
 
@@ -28,7 +29,7 @@ if not shell then
     end
 end
 if not shell then
-    warn("[API] 找不到主窗口")
+    warn("[Ext] 找不到主窗口")
     return
 end
 
@@ -78,192 +79,360 @@ local function label(parent, text, size, color, font, props)
     return item
 end
 
-local function input(parent, placeholder, text, props)
-    local item = new("TextBox", {
-        BackgroundColor3 = COLORS.panelRaised,
-        BorderSizePixel = 0,
-        Text = text or "",
-        PlaceholderText = placeholder,
-        PlaceholderColor3 = COLORS.muted,
-        TextColor3 = COLORS.text,
-        TextSize = 11,
-        Font = Enum.Font.Code,
-        ClearTextOnFocus = false,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextTransparency = 0,
-        Parent = parent,
-    })
-    corner(item, 6)
-    new("UIPadding", {
-        PaddingLeft = UDim.new(0, 10),
-        PaddingRight = UDim.new(0, 10),
-        Parent = item,
-    })
-    local s = stroke(item, COLORS.border, 0.4, 1)
-    item.Focused:Connect(function()
-        TweenService:Create(s, TweenInfo.new(0.15), {Color = COLORS.accent, Transparency = 0.2}):Play()
-    end)
-    item.FocusLost:Connect(function()
-        TweenService:Create(s, TweenInfo.new(0.15), {Color = COLORS.border, Transparency = 0.4}):Play()
-    end)
-    if props then for k, v in pairs(props) do item[k] = v end end
-    return item
-end
-
 -- ============================================================
 -- Toast
 -- ============================================================
-local toastHolder = new("Frame", {
-    Visible = false,
-    AnchorPoint = Vector2.new(0.5, 0),
-    Position = UDim2.new(0.5, 0, 0, -50),
-    Size = UDim2.fromOffset(0, 38),
+local function makeStatusToast()
+    local holder = new("Frame", {
+        Name = "ExtToast", Visible = false,
+        AnchorPoint = Vector2.new(0.5, 0),
+        Position = UDim2.new(0.5, 0, 0, -50),
+        Size = UDim2.fromOffset(0, 40),
+        AutomaticSize = Enum.AutomaticSize.X,
+        BackgroundColor3 = COLORS.panel,
+        BackgroundTransparency = 0.05,
+        BorderSizePixel = 0, ZIndex = 200, Parent = gui,
+    })
+    corner(holder, 10)
+    stroke(holder, COLORS.border, 0.15, 1)
+    new("UIPadding", {
+        PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 18),
+        Parent = holder,
+    })
+    local accentBar = new("Frame", {
+        AnchorPoint = Vector2.new(0, 0.5),
+        Position = UDim2.new(0, 0, 0.5, 0),
+        Size = UDim2.fromOffset(3, 22),
+        BackgroundColor3 = COLORS.accent,
+        BorderSizePixel = 0, ZIndex = 201, Parent = holder,
+    })
+    corner(accentBar, 2)
+    local iconLabel = label(holder, "•", 16, COLORS.accent, Enum.Font.SourceSansBold, {
+        Position = UDim2.fromOffset(12, 0), Size = UDim2.fromOffset(20, 40), ZIndex = 201,
+    })
+    local textLabel = label(holder, "", 12, COLORS.text, Enum.Font.SourceSansSemibold, {
+        Position = UDim2.fromOffset(34, 0),
+        Size = UDim2.new(0, 0, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.X, ZIndex = 201,
+    })
+    local conn
+    return function(msg, color, icon)
+        color = color or COLORS.accent
+        icon = icon or "•"
+        if conn then conn:Disconnect() end
+        holder.Visible = true
+        holder.Position = UDim2.new(0.5, 0, 0, -50)
+        holder.BackgroundTransparency = 0.05
+        accentBar.BackgroundColor3 = color
+        iconLabel.Text = icon
+        iconLabel.TextColor3 = color
+        textLabel.Text = msg
+        textLabel.TextColor3 = COLORS.text
+        textLabel.TextTransparency = 0
+        accentBar.BackgroundTransparency = 0
+        TweenService:Create(holder, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            Position = UDim2.new(0.5, 0, 0, 20),
+        }):Play()
+        conn = task.delay(2.6, function()
+            local t = TweenService:Create(holder, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                Position = UDim2.new(0.5, 0, 0, -50), BackgroundTransparency = 1,
+            })
+            local t2 = TweenService:Create(textLabel, TweenInfo.new(0.2), {TextTransparency = 1})
+            t:Play(); t2:Play()
+            t.Completed:Wait()
+            holder.Visible = false
+            holder.BackgroundTransparency = 0.05
+            textLabel.TextTransparency = 0
+        end)
+    end
+end
+
+local toast = makeStatusToast()
+
+-- ============================================================
+-- Tooltip
+-- ============================================================
+local tooltipHolder = new("Frame", {
+    Name = "ExtTooltip", Visible = false,
+    BackgroundColor3 = Color3.fromRGB(14, 17, 26),
+    BackgroundTransparency = 0.05, BorderSizePixel = 0,
+    Size = UDim2.fromOffset(0, 26),
     AutomaticSize = Enum.AutomaticSize.X,
-    BackgroundColor3 = COLORS.panel,
-    BackgroundTransparency = 0.05,
-    BorderSizePixel = 0, ZIndex = 250, Parent = gui,
+    ZIndex = 300, Parent = gui,
 })
-corner(toastHolder, 10)
-stroke(toastHolder, COLORS.border, 0.15, 1)
+corner(tooltipHolder, 6)
+stroke(tooltipHolder, COLORS.border, 0.2, 1)
 new("UIPadding", {
-    PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 18),
-    Parent = toastHolder,
+    PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10), Parent = tooltipHolder,
 })
-local toastBar = new("Frame", {
-    AnchorPoint = Vector2.new(0, 0.5),
-    Position = UDim2.new(0, 0, 0.5, 0),
-    Size = UDim2.fromOffset(3, 22),
-    BackgroundColor3 = COLORS.accent,
-    BorderSizePixel = 0, ZIndex = 251, Parent = toastHolder,
-})
-corner(toastBar, 2)
-local toastIcon = label(toastHolder, "•", 16, COLORS.accent, Enum.Font.SourceSansBold, {
-    Position = UDim2.fromOffset(12, 0), Size = UDim2.fromOffset(20, 38), ZIndex = 251,
-})
-local toastText = label(toastHolder, "", 12, COLORS.text, Enum.Font.SourceSansSemibold, {
-    Position = UDim2.fromOffset(34, 0),
-    Size = UDim2.new(0, 0, 1, 0),
-    AutomaticSize = Enum.AutomaticSize.X, ZIndex = 251,
+local tooltipLabel = label(tooltipHolder, "", 11, COLORS.text, Enum.Font.SourceSans, {
+    Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X, ZIndex = 301,
 })
 
-local toastConn
-local function toast(msg, color, icon)
-    color = color or COLORS.accent
-    icon = icon or "•"
-    if toastConn then toastConn:Disconnect() end
-    toastHolder.Visible = true
-    toastHolder.Position = UDim2.new(0.5, 0, 0, -50)
-    toastHolder.BackgroundTransparency = 0.05
-    toastBar.BackgroundColor3 = color
-    toastIcon.Text = icon
-    toastIcon.TextColor3 = color
-    toastText.Text = msg
-    toastText.TextColor3 = COLORS.text
-    toastText.TextTransparency = 0
-    toastBar.BackgroundTransparency = 0
-    TweenService:Create(toastHolder, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Position = UDim2.new(0.5, 0, 0, 20),
-    }):Play()
-    toastConn = task.delay(2.6, function()
-        local t = TweenService:Create(toastHolder, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-            Position = UDim2.new(0.5, 0, 0, -50), BackgroundTransparency = 1,
-        })
-        local t2 = TweenService:Create(toastText, TweenInfo.new(0.2), {TextTransparency = 1})
-        t:Play(); t2:Play()
-        t.Completed:Wait()
-        toastHolder.Visible = false
-        toastHolder.BackgroundTransparency = 0.05
-        toastText.TextTransparency = 0
+local function attachTooltip(btn, text)
+    btn.MouseEnter:Connect(function()
+        tooltipLabel.Text = text
+        tooltipHolder.Visible = true
+        local absPos = btn.AbsolutePosition
+        local absSize = btn.AbsoluteSize
+        task.defer(function()
+            tooltipHolder.Position = UDim2.fromOffset(
+                absPos.X - tooltipHolder.AbsoluteSize.X - 10,
+                absPos.Y + absSize.Y / 2 - 13
+            )
+        end)
     end)
+    btn.MouseLeave:Connect(function() tooltipHolder.Visible = false end)
+    btn.MouseButton1Down:Connect(function() tooltipHolder.Visible = false end)
 end
 
 -- ============================================================
--- 从主 UI 里抠配置
+-- 快捷工具条
 -- ============================================================
-local function findAllTextBoxes()
-    local list = {}
-    for _, d in ipairs(shell:GetDescendants()) do
-        if d:IsA("TextBox") then
-            table.insert(list, d)
-        end
+local function buildQuickBar()
+    local bar = new("Frame", {
+        Name = "ExtQuickBar",
+        AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.new(1, -12, 0.5, 0),
+        Size = UDim2.fromOffset(46, 400),
+        BackgroundColor3 = COLORS.panel,
+        BackgroundTransparency = 0.08,
+        BorderSizePixel = 0, Active = true,
+        ZIndex = 30, Parent = shell,
+    })
+    corner(bar, 23)
+    stroke(bar, COLORS.border, 0.35, 1)
+    new("UIListLayout", {
+        Padding = UDim.new(0, 6),
+        HorizontalAlignment = Enum.HorizontalAlignment.Center,
+        VerticalAlignment = Enum.VerticalAlignment.Center,
+        SortOrder = Enum.SortOrder.LayoutOrder, Parent = bar,
+    })
+    local buttons = {}
+    local function makeToolButton(icon, tip, callback, order)
+        local btn = new("TextButton", {
+            Size = UDim2.fromOffset(36, 36),
+            BackgroundColor3 = COLORS.panelRaised,
+            BackgroundTransparency = 0.25,
+            BorderSizePixel = 0, Text = icon,
+            TextColor3 = COLORS.text, TextSize = 17,
+            Font = Enum.Font.SourceSansBold,
+            AutoButtonColor = false, LayoutOrder = order,
+            ZIndex = 31, Parent = bar,
+        })
+        corner(btn, 18)
+        local s = stroke(btn, COLORS.border, 0.5, 1)
+        btn.MouseEnter:Connect(function()
+            TweenService:Create(btn, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
+                BackgroundTransparency = 0, BackgroundColor3 = COLORS.accent,
+                TextColor3 = Color3.fromRGB(255, 255, 255),
+                Size = UDim2.fromOffset(40, 40),
+            }):Play()
+            TweenService:Create(s, TweenInfo.new(0.15), {Color = COLORS.accentBright, Transparency = 0.2}):Play()
+        end)
+        btn.MouseLeave:Connect(function()
+            TweenService:Create(btn, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
+                BackgroundTransparency = 0.25, BackgroundColor3 = COLORS.panelRaised,
+                TextColor3 = COLORS.text,
+                Size = UDim2.fromOffset(36, 36),
+            }):Play()
+            TweenService:Create(s, TweenInfo.new(0.15), {Color = COLORS.border, Transparency = 0.5}):Play()
+        end)
+        btn.MouseButton1Down:Connect(function()
+            TweenService:Create(btn, TweenInfo.new(0.08), {Size = UDim2.fromOffset(32, 32)}):Play()
+        end)
+        btn.MouseButton1Up:Connect(function()
+            TweenService:Create(btn, TweenInfo.new(0.12, Enum.EasingStyle.Back), {Size = UDim2.fromOffset(40, 40)}):Play()
+        end)
+        btn.MouseButton1Click:Connect(callback)
+        attachTooltip(btn, tip)
+        table.insert(buttons, btn)
+        return btn
     end
-    return list
-end
-
--- 找 API Key 输入框（placeholder 是 sk-... 的）
-local function findApiKeyBox()
-    for _, box in ipairs(findAllTextBoxes()) do
-        if box.PlaceholderText and (box.PlaceholderText:find("sk") or box.PlaceholderText:find("API")) then
-            return box
+    local dragging, dragStart, startPos
+    bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; dragStart = input.Position; startPos = bar.Position
         end
-    end
-    return nil
+    end)
+    bar.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            bar.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    return bar, makeToolButton
 end
 
 -- ============================================================
--- API 配置面板
+-- 命令历史
 -- ============================================================
-local PRESETS = {
-    {
-        name = "DeepSeek 官方",
-        url = "https://api.deepseek.com/chat/completions",
-        models = {"deepseek-flash", "deepseek-v4-pro"},
-    },
-    {
-        name = "OpenAI",
-        url = "https://api.openai.com/v1/chat/completions",
-        models = {"gpt-4o", "gpt-4o-mini", "gpt-4-turbo"},
-    },
-    {
-        name = "OpenRouter",
-        url = "https://openrouter.ai/api/v1/chat/completions",
-        models = {"anthropic/claude-3.5-sonnet", "google/gemini-pro-1.5", "meta-llama/llama-3.1-405b"},
-    },
-    {
-        name = "本地 Ollama",
-        url = "http://localhost:11434/v1/chat/completions",
-        models = {"llama3", "qwen2.5", "deepseek-r1"},
-    },
-    {
-        name = "自定义",
-        url = "",
-        models = {},
-    },
-}
+local commandHistory = {}
 
-local function buildApiPanel()
+local function pushCommand(text)
+    table.insert(commandHistory, 1, { text = text, time = os.time() })
+    if #commandHistory > 50 then table.remove(commandHistory, 51) end
+end
+
+local function formatTime(t)
+    return os.date("%H:%M:%S", t)
+end
+
+local function buildHistoryPanel()
     local panel = new("Frame", {
-        Name = "ExtApiPanel",
-        Visible = false,
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = UDim2.fromScale(0.5, 0.5),
-        Size = UDim2.fromOffset(480, 500),
+        Name = "ExtHistory", Visible = false,
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -70, 0, 70),
+        Size = UDim2.fromOffset(300, 360),
         BackgroundColor3 = COLORS.panel,
         BackgroundTransparency = 0.02,
-        BorderSizePixel = 0,
-        ZIndex = 80, Parent = gui,
+        BorderSizePixel = 0, ZIndex = 35, Parent = shell,
     })
-    corner(panel, 12)
-    stroke(panel, COLORS.border, 0.1, 1)
-
-    label(panel, "API 配置", 16, COLORS.text, Enum.Font.SourceSansBold, {
-        Position = UDim2.fromOffset(18, 16),
-        Size = UDim2.new(1, -60, 0, 24), ZIndex = 81,
+    corner(panel, 10)
+    stroke(panel, COLORS.border, 0.15, 1)
+    label(panel, "命令历史", 13, COLORS.text, Enum.Font.SourceSansBold, {
+        Position = UDim2.fromOffset(14, 12), Size = UDim2.new(1, -60, 0, 20), ZIndex = 36,
     })
-    label(panel, "修改后点保存，立即生效", 10, COLORS.muted, Enum.Font.SourceSans, {
-        Position = UDim2.fromOffset(18, 40),
-        Size = UDim2.new(1, -60, 0, 16), ZIndex = 81,
+    local countLabel = label(panel, "0 条", 10, COLORS.muted, Enum.Font.SourceSans, {
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -42, 0, 16),
+        Size = UDim2.fromOffset(50, 16),
+        TextXAlignment = Enum.TextXAlignment.Right, ZIndex = 36,
     })
-
     local closeBtn = new("TextButton", {
         AnchorPoint = Vector2.new(1, 0),
-        Position = UDim2.new(1, -14, 0, 14),
-        Size = UDim2.fromOffset(26, 26),
+        Position = UDim2.new(1, -10, 0, 10),
+        Size = UDim2.fromOffset(24, 24),
         BackgroundColor3 = COLORS.panelRaised,
         BorderSizePixel = 0, Text = "×",
-        TextColor3 = COLORS.muted, TextSize = 16,
+        TextColor3 = COLORS.muted, TextSize = 14,
         Font = Enum.Font.SourceSansBold,
-        AutoButtonColor = false, ZIndex = 81, Parent = panel,
+        AutoButtonColor = false, ZIndex = 36, Parent = panel,
+    })
+    corner(closeBtn, 6)
+    closeBtn.MouseEnter:Connect(function()
+        TweenService:Create(closeBtn, TweenInfo.new(0.12), {
+            BackgroundColor3 = COLORS.danger, TextColor3 = Color3.fromRGB(255,255,255),
+        }):Play()
+    end)
+    closeBtn.MouseLeave:Connect(function()
+        TweenService:Create(closeBtn, TweenInfo.new(0.12), {
+            BackgroundColor3 = COLORS.panelRaised, TextColor3 = COLORS.muted,
+        }):Play()
+    end)
+    closeBtn.MouseButton1Click:Connect(function() panel.Visible = false end)
+    local scroll = new("ScrollingFrame", {
+        Position = UDim2.fromOffset(10, 44),
+        Size = UDim2.new(1, -20, 1, -54),
+        BackgroundTransparency = 1, BorderSizePixel = 0,
+        CanvasSize = UDim2.new(),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        ScrollBarThickness = 3, ScrollBarImageColor3 = COLORS.border,
+        ZIndex = 36, Parent = panel,
+    })
+    new("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder, Parent = scroll })
+    local function refresh()
+        for _, child in ipairs(scroll:GetChildren()) do
+            if not child:IsA("UIListLayout") then child:Destroy() end
+        end
+        countLabel.Text = #commandHistory .. " 条"
+        if #commandHistory == 0 then
+            label(scroll, "还没有历史记录", 11, COLORS.muted, Enum.Font.SourceSans, {
+                Size = UDim2.new(1, 0, 0, 30),
+                TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 37,
+            })
+            return
+        end
+        for i, item in ipairs(commandHistory) do
+            local row = new("TextButton", {
+                Size = UDim2.new(1, -6, 0, 42),
+                BackgroundColor3 = COLORS.panelRaised,
+                BackgroundTransparency = 0.35,
+                BorderSizePixel = 0, Text = "",
+                AutoButtonColor = false, LayoutOrder = i,
+                ZIndex = 37, Parent = scroll,
+            })
+            corner(row, 6)
+            local rs = stroke(row, COLORS.border, 0.6, 1)
+            label(row, item.text:sub(1, 50) .. (#item.text > 50 and "..." or ""), 11, COLORS.text, Enum.Font.SourceSans, {
+                Position = UDim2.fromOffset(10, 6), Size = UDim2.new(1, -60, 0, 18), ZIndex = 38,
+            })
+            label(row, formatTime(item.time), 9, COLORS.muted, Enum.Font.Code, {
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, -10, 0, 7),
+                Size = UDim2.fromOffset(50, 14),
+                TextXAlignment = Enum.TextXAlignment.Right, ZIndex = 38,
+            })
+            label(row, "点击填入", 9, COLORS.accent, Enum.Font.SourceSans, {
+                Position = UDim2.fromOffset(10, 24), Size = UDim2.fromOffset(80, 12), ZIndex = 38,
+            })
+            row.MouseEnter:Connect(function()
+                TweenService:Create(row, TweenInfo.new(0.12), {
+                    BackgroundTransparency = 0.05, BackgroundColor3 = COLORS.panel,
+                }):Play()
+                TweenService:Create(rs, TweenInfo.new(0.12), {Color = COLORS.accent, Transparency = 0.3}):Play()
+            end)
+            row.MouseLeave:Connect(function()
+                TweenService:Create(row, TweenInfo.new(0.12), {
+                    BackgroundTransparency = 0.35, BackgroundColor3 = COLORS.panelRaised,
+                }):Play()
+                TweenService:Create(rs, TweenInfo.new(0.12), {Color = COLORS.border, Transparency = 0.6}):Play()
+            end)
+            row.MouseButton1Click:Connect(function()
+                local box
+                for _, d in ipairs(shell:GetDescendants()) do
+                    if d:IsA("TextBox") and d.PlaceholderText:find("Codex") then box = d break end
+                end
+                if box then
+                    box.Text = item.text
+                    box:CaptureFocus()
+                    toast("已填入输入框", COLORS.green, "✓")
+                end
+                panel.Visible = false
+            end)
+        end
+    end
+    return panel, refresh
+end
+
+-- ============================================================
+-- 运行统计
+-- ============================================================
+local function buildStatsPanel()
+    local panel = new("Frame", {
+        Name = "ExtStats", Visible = false,
+        AnchorPoint = Vector2.new(0, 0),
+        Position = UDim2.fromOffset(70, 70),
+        Size = UDim2.fromOffset(240, 240),
+        BackgroundColor3 = COLORS.panel,
+        BackgroundTransparency = 0.02,
+        BorderSizePixel = 0, ZIndex = 35, Parent = shell,
+    })
+    corner(panel, 10)
+    stroke(panel, COLORS.border, 0.15, 1)
+    label(panel, "运行统计", 13, COLORS.text, Enum.Font.SourceSansBold, {
+        Position = UDim2.fromOffset(14, 12), Size = UDim2.new(1, -60, 0, 20), ZIndex = 36,
+    })
+    local closeBtn = new("TextButton", {
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -10, 0, 10),
+        Size = UDim2.fromOffset(24, 24),
+        BackgroundColor3 = COLORS.panelRaised,
+        BorderSizePixel = 0, Text = "×",
+        TextColor3 = COLORS.muted, TextSize = 14,
+        Font = Enum.Font.SourceSansBold,
+        AutoButtonColor = false, ZIndex = 36, Parent = panel,
     })
     corner(closeBtn, 6)
     closeBtn.MouseEnter:Connect(function()
@@ -278,290 +447,415 @@ local function buildApiPanel()
     end)
     closeBtn.MouseButton1Click:Connect(function() panel.Visible = false end)
 
-    -- 预设
-    label(panel, "预设", 10, COLORS.muted, Enum.Font.SourceSansBold, {
-        Position = UDim2.fromOffset(18, 70),
-        Size = UDim2.fromOffset(100, 14), ZIndex = 81,
-    })
-
-    local presetButtons = {}
-    local function refreshPresets(activeIdx)
-        for i, btn in ipairs(presetButtons) do
-            local isActive = (i == activeIdx)
-            btn.BackgroundColor3 = isActive and COLORS.accent or COLORS.panelRaised
-            btn.TextColor3 = isActive and Color3.fromRGB(255,255,255) or COLORS.text
-        end
-    end
-
-    for i, preset in ipairs(PRESETS) do
-        local b = new("TextButton", {
-            Position = UDim2.fromOffset(18 + (i-1) * 88, 86),
-            Size = UDim2.fromOffset(82, 28),
-            BackgroundColor3 = COLORS.panelRaised,
-            BorderSizePixel = 0, Text = preset.name,
-            TextColor3 = COLORS.text, TextSize = 10,
-            Font = Enum.Font.SourceSansSemibold,
-            AutoButtonColor = false, ZIndex = 81, Parent = panel,
+    local rows = {
+        {name = "消息数",   key = "messages", color = COLORS.accent},
+        {name = "工具调用", key = "tools",    color = COLORS.green},
+        {name = "Token",    key = "tokens",   color = COLORS.orange},
+        {name = "上限",     key = "limit",    color = COLORS.purple},
+        {name = "运行时长", key = "uptime",   color = COLORS.accentBright},
+    }
+    local labels = {}
+    for i, r in ipairs(rows) do
+        local y = 44 + (i-1) * 30
+        local dot = new("Frame", {
+            Position = UDim2.fromOffset(14, y + 6),
+            Size = UDim2.fromOffset(6, 6),
+            BackgroundColor3 = r.color,
+            BorderSizePixel = 0, ZIndex = 36, Parent = panel,
         })
-        corner(b, 6)
-        stroke(b, COLORS.border, 0.5, 1)
-        b.MouseEnter:Connect(function()
-            TweenService:Create(b, TweenInfo.new(0.12), {BackgroundColor3 = COLORS.accent}):Play()
-        end)
-        b.MouseLeave:Connect(function()
-            if b.BackgroundColor3 ~= COLORS.accent then
-                TweenService:Create(b, TweenInfo.new(0.12), {BackgroundColor3 = COLORS.panelRaised}):Play()
-            end
-        end)
-        b.MouseButton1Click:Connect(function()
-            refreshPresets(i)
-            if preset.url ~= "" then
-                urlBox.Text = preset.url
-            end
-            if #preset.models > 0 then
-                modelBox.Text = preset.models[1]
-            end
-            toast("已切换: " .. preset.name, COLORS.accent, "◎")
-        end)
-        table.insert(presetButtons, b)
+        corner(dot, 3)
+        label(panel, r.name, 11, COLORS.muted, Enum.Font.SourceSans, {
+            Position = UDim2.fromOffset(28, y), Size = UDim2.fromOffset(90, 18), ZIndex = 36,
+        })
+        labels[r.key] = label(panel, "—", 12, COLORS.text, Enum.Font.SourceSansSemibold, {
+            AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.new(1, -14, 0, y),
+            Size = UDim2.fromOffset(110, 18),
+            TextXAlignment = Enum.TextXAlignment.Right, ZIndex = 36,
+        })
+    end
+    return panel, labels
+end
+
+-- ============================================================
+-- API 配置弹窗
+-- ============================================================
+local apiConfigPanel
+
+local function buildApiConfigPanel()
+    local panel = new("Frame", {
+        Name = "ExtApiConfig", Visible = false,
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.fromOffset(440, 400),
+        BackgroundColor3 = COLORS.panel,
+        BackgroundTransparency = 0.02,
+        BorderSizePixel = 0, ZIndex = 60, Parent = gui,
+    })
+    corner(panel, 12)
+    stroke(panel, COLORS.border, 0.15, 1)
+
+    local overlay = new("Frame", {
+        Name = "ExtApiOverlay", Visible = false,
+        BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+        BackgroundTransparency = 0.5,
+        BorderSizePixel = 0,
+        Size = UDim2.fromScale(1, 1),
+        ZIndex = 59, Parent = gui,
+    })
+    overlay.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            overlay.Visible = false
+            panel.Visible = false
+        end
+    end)
+
+    label(panel, "API 配置", 15, COLORS.text, Enum.Font.SourceSansBold, {
+        Position = UDim2.fromOffset(20, 18), Size = UDim2.new(1, -60, 0, 24), ZIndex = 61,
+    })
+    label(panel, "改完保存，下一次对话立即生效", 10, COLORS.muted, Enum.Font.SourceSans, {
+        Position = UDim2.fromOffset(20, 42), Size = UDim2.new(1, -60, 0, 16), ZIndex = 61,
+    })
+
+    local closeBtn = new("TextButton", {
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -14, 0, 14),
+        Size = UDim2.fromOffset(28, 28),
+        BackgroundColor3 = COLORS.panelRaised,
+        BorderSizePixel = 0, Text = "×",
+        TextColor3 = COLORS.muted, TextSize = 16,
+        Font = Enum.Font.SourceSansBold,
+        AutoButtonColor = false, ZIndex = 61, Parent = panel,
+    })
+    corner(closeBtn, 8)
+    closeBtn.MouseButton1Click:Connect(function()
+        overlay.Visible = false
+        panel.Visible = false
+    end)
+
+    local function makeInput(y, labelText, placeholder, value)
+        label(panel, labelText, 10, COLORS.muted, Enum.Font.SourceSansBold, {
+            Position = UDim2.fromOffset(20, y),
+            Size = UDim2.new(1, -40, 0, 16),
+            ZIndex = 61,
+        })
+        local box = new("TextBox", {
+            Position = UDim2.fromOffset(20, y + 18),
+            Size = UDim2.new(1, -40, 0, 38),
+            BackgroundColor3 = COLORS.canvas or Color3.fromRGB(12, 14, 20),
+            BorderSizePixel = 0,
+            Text = value or "",
+            PlaceholderText = placeholder,
+            PlaceholderColor3 = Color3.fromRGB(90, 98, 118),
+            TextColor3 = COLORS.text,
+            TextSize = 11,
+            Font = Enum.Font.Code,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ClearTextOnFocus = false,
+            ZIndex = 61, Parent = panel,
+        })
+        corner(box, 8)
+        new("UIPadding", {
+            PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10),
+            Parent = box,
+        })
+        stroke(box, COLORS.border, 0.4, 1)
+        return box
     end
 
-    -- API 地址
-    label(panel, "API 地址", 10, COLORS.muted, Enum.Font.SourceSansBold, {
-        Position = UDim2.fromOffset(18, 128),
-        Size = UDim2.fromOffset(200, 14), ZIndex = 81,
-    })
-    local urlBox = input(panel, "https://api.example.com/v1/chat/completions", "", {
-        Position = UDim2.fromOffset(18, 146),
-        Size = UDim2.new(1, -36, 0, 34),
-        ZIndex = 81,
-    })
+    local modelInput = makeInput(70, "模型", "deepseek-flash", "")
+    local keyInput   = makeInput(144, "API KEY", "sk-...", "")
+    local urlInput   = makeInput(218, "API 地址", "https://api.deepseek.com/chat/completions", "")
 
-    -- API Key
-    label(panel, "API Key", 10, COLORS.muted, Enum.Font.SourceSansBold, {
-        Position = UDim2.fromOffset(18, 190),
-        Size = UDim2.fromOffset(200, 14), ZIndex = 81,
-    })
-    local keyBox = input(panel, "sk-...", "", {
-        Position = UDim2.fromOffset(18, 208),
-        Size = UDim2.new(1, -36, 0, 34),
-        ZIndex = 81,
-    })
-
-    -- 模型
-    label(panel, "模型名", 10, COLORS.muted, Enum.Font.SourceSansBold, {
-        Position = UDim2.fromOffset(18, 252),
-        Size = UDim2.fromOffset(200, 14), ZIndex = 81,
-    })
-    local modelBox = input(panel, "deepseek-flash", "", {
-        Position = UDim2.fromOffset(18, 270),
-        Size = UDim2.new(1, -36, 0, 34),
-        ZIndex = 81,
-    })
-
-    -- 温度
-    label(panel, "温度 (0.0 - 2.0)", 10, COLORS.muted, Enum.Font.SourceSansBold, {
-        Position = UDim2.fromOffset(18, 314),
-        Size = UDim2.fromOffset(200, 14), ZIndex = 81,
-    })
-    local tempBox = input(panel, "0.3", "0.3", {
-        Position = UDim2.fromOffset(18, 332),
-        Size = UDim2.new(1, -36, 0, 34),
-        ZIndex = 81,
-    })
-
-    -- 按钮
-    local applyBtn = new("TextButton", {
-        Position = UDim2.fromOffset(18, 388),
-        Size = UDim2.new(1, -36, 0, 40),
+    local saveBtn = new("TextButton", {
+        Position = UDim2.fromOffset(20, 300),
+        Size = UDim2.new(1, -40, 0, 42),
         BackgroundColor3 = COLORS.accent,
         BorderSizePixel = 0, Text = "保存并应用",
-        TextColor3 = Color3.fromRGB(255, 255, 255),
-        TextSize = 13, Font = Enum.Font.SourceSansBold,
-        AutoButtonColor = false, ZIndex = 81, Parent = panel,
+        TextColor3 = COLORS.panel, TextSize = 14,
+        Font = Enum.Font.SourceSansBold,
+        AutoButtonColor = false, ZIndex = 61, Parent = panel,
     })
-    corner(applyBtn, 8)
-    applyBtn.MouseEnter:Connect(function()
-        TweenService:Create(applyBtn, TweenInfo.new(0.15), {
+    corner(saveBtn, 8)
+
+    saveBtn.MouseEnter:Connect(function()
+        TweenService:Create(saveBtn, TweenInfo.new(0.12), {
             BackgroundColor3 = COLORS.accentBright,
         }):Play()
     end)
-    applyBtn.MouseLeave:Connect(function()
-        TweenService:Create(applyBtn, TweenInfo.new(0.15), {
+    saveBtn.MouseLeave:Connect(function()
+        TweenService:Create(saveBtn, TweenInfo.new(0.12), {
             BackgroundColor3 = COLORS.accent,
         }):Play()
     end)
 
-    local testBtn = new("TextButton", {
-        Position = UDim2.fromOffset(18, 436),
-        Size = UDim2.new(1, -36, 0, 36),
-        BackgroundColor3 = COLORS.panelRaised,
-        BorderSizePixel = 0, Text = "测试连接",
-        TextColor3 = COLORS.text, TextSize = 12,
-        Font = Enum.Font.SourceSansSemibold,
-        AutoButtonColor = false, ZIndex = 81, Parent = panel,
-    })
-    corner(testBtn, 8)
-    stroke(testBtn, COLORS.border, 0.5, 1)
-    testBtn.MouseEnter:Connect(function()
-        TweenService:Create(testBtn, TweenInfo.new(0.12), {BackgroundColor3 = COLORS.panel}):Play()
-    end)
-    testBtn.MouseLeave:Connect(function()
-        TweenService:Create(testBtn, TweenInfo.new(0.12), {BackgroundColor3 = COLORS.panelRaised}):Play()
-    end)
-
-    -- 状态文本
-    local statusLabel = label(panel, "", 10, COLORS.muted, Enum.Font.SourceSans, {
-        Position = UDim2.fromOffset(18, 478),
-        Size = UDim2.new(1, -36, 0, 16), ZIndex = 81,
-    })
-
-    -- 测试连接
-    testBtn.MouseButton1Click:Connect(function()
-        local url = urlBox.Text
-        local key = keyBox.Text
-        local model = modelBox.Text
-
-        if url == "" then
-            statusLabel.Text = "请填写 API 地址"
-            statusLabel.TextColor3 = COLORS.danger
-            return
-        end
-
-        statusLabel.Text = "测试中..."
-        statusLabel.TextColor3 = COLORS.orange
-
-        task.spawn(function()
-            local HttpService = game:GetService("HttpService")
-            local body = HttpService:JSONEncode({
-                model = model,
-                messages = {{ role = "user", content = "hi" }},
-                max_tokens = 5,
-            })
-            local headers = {
-                ["Content-Type"] = "application/json",
-                ["Authorization"] = "Bearer " .. key,
-            }
-
-            local ok, result
-            if request then
-                ok, result = pcall(function()
-                    return request({Url = url, Method = "POST", Headers = headers, Body = body})
-                end)
-            else
-                ok, result = pcall(function()
-                    return HttpService:RequestAsync({Url = url, Method = "POST", Headers = headers, Body = body})
-                end)
-            end
-
-            if ok and result then
-                local code = result.StatusCode or 0
-                if code == 200 then
-                    statusLabel.Text = "✓ 连接成功"
-                    statusLabel.TextColor3 = COLORS.green
-                    toast("连接测试通过", COLORS.green, "✓")
-                else
-                    statusLabel.Text = "✗ 失败 HTTP " .. tostring(code)
-                    statusLabel.TextColor3 = COLORS.danger
-                    toast("连接失败: " .. tostring(code), COLORS.danger, "✕")
-                end
-            else
-                statusLabel.Text = "✗ 请求失败"
-                statusLabel.TextColor3 = COLORS.danger
-                toast("请求失败", COLORS.danger, "✕")
-            end
-        end)
-    end)
-
-    -- 保存应用
-    applyBtn.MouseButton1Click:Connect(function()
-        local url = urlBox.Text
-        local key = keyBox.Text
-        local model = modelBox.Text
-        local temp = tonumber(tempBox.Text) or 0.3
-
-        if url == "" then
-            toast("API 地址不能为空", COLORS.danger, "✕")
-            return
-        end
-
-        -- 尝试改主 UI 的 key 输入框
-        local mainKeyBox = findApiKeyBox()
-        if mainKeyBox and key ~= "" then
-            mainKeyBox.Text = key
-            mainKeyBox:ReleaseFocus()
-        end
-
-        -- 存到全局，主脚本可读
+    saveBtn.MouseButton1Click:Connect(function()
         _G.CodexConfig = _G.CodexConfig or {}
-        _G.CodexConfig.API_URL = url
-        _G.CodexConfig.API_KEY = key
-        _G.CodexConfig.MODEL = model
-        _G.CodexConfig.TEMPERATURE = temp
+        _G.CodexConfig.MODEL   = modelInput.Text
+        _G.CodexConfig.API_KEY = keyInput.Text
+        _G.CodexConfig.API_URL = urlInput.Text
 
-        toast("已保存配置", COLORS.green, "✓")
-        statusLabel.Text = "已保存 · " .. model
-        statusLabel.TextColor3 = COLORS.green
+        if _G.CodexLiveConfig then
+            _G.CodexLiveConfig.MODEL   = modelInput.Text
+            _G.CodexLiveConfig.API_KEY = keyInput.Text
+            _G.CodexLiveConfig.API_URL = urlInput.Text
+        end
+
+        toast("配置已保存", COLORS.green, "✓")
+        overlay.Visible = false
+        panel.Visible = false
     end)
 
-    return panel, {
-        urlBox = urlBox,
-        keyBox = keyBox,
-        modelBox = modelBox,
-        tempBox = tempBox,
-        statusLabel = statusLabel,
-    }
+    local function openPanel()
+        local cfg = _G.CodexConfig or {}
+        local live = _G.CodexLiveConfig or {}
+        modelInput.Text = live.MODEL or cfg.MODEL or "deepseek-flash"
+        keyInput.Text   = live.API_KEY or cfg.API_KEY or ""
+        urlInput.Text   = live.API_URL or cfg.API_URL or "https://api.deepseek.com/chat/completions"
+
+        overlay.Visible = true
+        panel.Visible = true
+        panel.BackgroundTransparency = 1
+        TweenService:Create(panel, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
+            BackgroundTransparency = 0.02,
+        }):Play()
+    end
+
+    return panel, overlay, openPanel
 end
 
 -- ============================================================
 -- 装配
 -- ============================================================
-local apiPanel, apiRefs = buildApiPanel()
+local bar, makeToolButton = buildQuickBar()
+local historyPanel, refreshHistory = buildHistoryPanel()
+local statsPanel, statsLabels = buildStatsPanel()
+local apiPanel, apiOverlay, openApiPanel = buildApiConfigPanel()
+apiConfigPanel = apiPanel
 
--- 加一个悬浮按钮打开面板
-local apiBtn = new("TextButton", {
-    Name = "ExtApiButton",
-    AnchorPoint = Vector2.new(1, 0.5),
-    Position = UDim2.new(1, -66, 0.5, -160),
-    Size = UDim2.fromOffset(36, 36),
-    BackgroundColor3 = COLORS.panelRaised,
-    BackgroundTransparency = 0.2,
-    BorderSizePixel = 0, Text = "⚡",
-    TextColor3 = COLORS.text, TextSize = 16,
-    Font = Enum.Font.SourceSansBold,
-    AutoButtonColor = false, ZIndex = 31, Parent = shell,
-})
-corner(apiBtn, 18)
-stroke(apiBtn, COLORS.border, 0.5, 1)
+bar.Position = UDim2.new(1, 60, 0.5, 0)
+bar.BackgroundTransparency = 1
+TweenService:Create(bar, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+    Position = UDim2.new(1, -12, 0.5, 0),
+    BackgroundTransparency = 0.08,
+}):Play()
 
-apiBtn.MouseEnter:Connect(function()
-    TweenService:Create(apiBtn, TweenInfo.new(0.15), {
-        BackgroundTransparency = 0,
-        BackgroundColor3 = COLORS.accent,
-        TextColor3 = Color3.fromRGB(255,255,255),
-        Size = UDim2.fromOffset(40, 40),
-    }):Play()
-end)
-apiBtn.MouseLeave:Connect(function()
-    TweenService:Create(apiBtn, TweenInfo.new(0.15), {
-        BackgroundTransparency = 0.2,
-        BackgroundColor3 = COLORS.panelRaised,
-        TextColor3 = COLORS.text,
-        Size = UDim2.fromOffset(36, 36),
-    }):Play()
-end)
+local function togglePanel(panel, other1, other2)
+    if other1 then other1.Visible = false end
+    if other2 then other2.Visible = false end
+    if panel.Visible then
+        local t = TweenService:Create(panel, TweenInfo.new(0.15), {BackgroundTransparency = 1})
+        t:Play(); t.Completed:Wait()
+        panel.Visible = false
+        panel.BackgroundTransparency = 0.02
+    else
+        panel.Visible = true
+        panel.BackgroundTransparency = 1
+        TweenService:Create(panel, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {BackgroundTransparency = 0.02}):Play()
+    end
+end
 
-apiBtn.MouseButton1Click:Connect(function()
-    apiPanel.Visible = not apiPanel.Visible
+makeToolButton("⏱", "命令历史 (Ctrl+H)", function()
+    refreshHistory()
+    togglePanel(historyPanel, statsPanel, apiPanel)
+end, 1)
+
+makeToolButton("📊", "运行统计", function()
+    togglePanel(statsPanel, historyPanel, apiPanel)
+end, 2)
+
+makeToolButton("🔑", "API 配置（模型 / Key / 地址）", function()
+    historyPanel.Visible = false
+    statsPanel.Visible = false
     if apiPanel.Visible then
-        -- 同步当前 key
-        local mainKeyBox = findApiKeyBox()
-        if mainKeyBox and mainKeyBox.Text ~= "" then
-            apiRefs.keyBox.Text = mainKeyBox.Text
+        apiOverlay.Visible = false
+        apiPanel.Visible = false
+    else
+        openApiPanel()
+    end
+end, 3)
+
+makeToolButton("📋", "复制全部对话", function()
+    local conv = shell:FindFirstChild("Conversation", true)
+    if not conv then toast("找不到对话区", COLORS.danger, "✕") return end
+    local texts = {}
+    for _, row in ipairs(conv:GetChildren()) do
+        if row:IsA("Frame") then
+            for _, sub in ipairs(row:GetDescendants()) do
+                if sub:IsA("TextLabel") and sub.Text ~= "" then
+                    table.insert(texts, sub.Text)
+                end
+            end
         end
-        apiPanel.BackgroundTransparency = 1
-        TweenService:Create(apiPanel, TweenInfo.new(0.2), {BackgroundTransparency = 0.02}):Play()
+    end
+    if setclipboard then
+        setclipboard(table.concat(texts, "\n---\n"))
+        toast("已复制 " .. #texts .. " 条消息", COLORS.green, "✓")
+    else
+        toast("当前环境无 setclipboard", COLORS.danger, "✕")
+    end
+end, 4)
+
+makeToolButton("🗑", "快速清空 (Ctrl+L)", function()
+    local conv = shell:FindFirstChild("Conversation", true)
+    if conv then
+        for _, child in ipairs(conv:GetChildren()) do
+            if child:IsA("GuiObject") and child.Name ~= "UIListLayout" then
+                child:Destroy()
+            end
+        end
+    end
+    commandHistory = {}
+    refreshHistory()
+    toast("已清空", COLORS.green, "✓")
+end, 5)
+
+makeToolButton("⚙", "打开设置", function()
+    local settingsBtn
+    for _, d in ipairs(shell:GetDescendants()) do
+        if d:IsA("TextButton") and d.Text:find("设置") then
+            settingsBtn = d break
+        end
+    end
+    if settingsBtn then
+        settingsBtn:Activate()
+        toast("已打开设置", COLORS.accent, "⚙")
+    else
+        toast("找不到设置按钮", COLORS.danger, "✕")
+    end
+end, 6)
+
+makeToolButton("?", "快捷键帮助", function()
+    toast("Ctrl+H 历史 · Ctrl+L 清空 · 🔑 改 API", COLORS.accentBright, "?")
+end, 7)
+
+-- ============================================================
+-- 统计刷新
+-- ============================================================
+local startTime = tick()
+local stats = { messages = 0, tools = 0 }
+
+local conversation = shell:FindFirstChild("Conversation", true)
+if conversation then
+    conversation.ChildAdded:Connect(function(child)
+        stats.messages += 1
+        if child:IsA("Frame") then
+            local head = child:FindFirstChild("Header", true)
+            if head and head.Text and head.Text:find("工具") then
+                stats.tools += 1
+            end
+        end
+    end)
+end
+
+local function findTokenLabel()
+    local candidates = {}
+    for _, d in ipairs(shell:GetDescendants()) do
+        if d:IsA("TextLabel") and d.Text ~= "" then
+            local lower = d.Text:lower()
+            if lower:find("token") or lower:find("tokens") then
+                table.insert(candidates, d)
+            end
+        end
+    end
+    if #candidates > 0 then return candidates[1] end
+    return nil
+end
+
+local function parseToken(text)
+    if not text then return nil, nil end
+    local nums = {}
+    for n in text:gmatch("%d+") do
+        table.insert(nums, tonumber(n))
+    end
+    if text:find("/") and #nums >= 2 then
+        return nums[1], nums[2]
+    end
+    if #nums >= 1 then
+        return nums[1], nil
+    end
+    return nil, nil
+end
+
+task.spawn(function()
+    while gui.Parent do
+        local uptime = tick() - startTime
+        statsLabels.messages.Text = tostring(stats.messages)
+        statsLabels.tools.Text = tostring(stats.tools)
+        statsLabels.uptime.Text = string.format("%.0fs", uptime)
+
+        local tokenLbl = findTokenLabel()
+        if tokenLbl then
+            local used, limit = parseToken(tokenLbl.Text)
+            if used then
+                statsLabels.tokens.Text = tostring(used)
+                if limit then
+                    statsLabels.limit.Text = tostring(limit)
+                    if limit > 0 and used >= limit then
+                        statsLabels.tokens.TextColor3 = COLORS.danger
+                    elseif limit > 0 and used / limit > 0.85 then
+                        statsLabels.tokens.TextColor3 = COLORS.orange
+                    else
+                        statsLabels.tokens.TextColor3 = COLORS.text
+                    end
+                else
+                    statsLabels.limit.Text = "无限制"
+                    statsLabels.tokens.TextColor3 = COLORS.text
+                end
+            else
+                statsLabels.tokens.Text = "—"
+                statsLabels.limit.Text = "—"
+            end
+        else
+            statsLabels.tokens.Text = "—"
+            statsLabels.limit.Text = "—"
+        end
+
+        task.wait(0.5)
     end
 end)
 
-toast("API 配置已就绪 · 点 ⚡ 打开", COLORS.accent, "⚡")
+-- ============================================================
+-- 快捷键
+-- ============================================================
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    local isCtrl = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
+        or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
+    if isCtrl and input.KeyCode == Enum.KeyCode.H then
+        refreshHistory()
+        togglePanel(historyPanel, statsPanel, apiPanel)
+    elseif isCtrl and input.KeyCode == Enum.KeyCode.L then
+        local conv = shell:FindFirstChild("Conversation", true)
+        if conv then
+            for _, child in ipairs(conv:GetChildren()) do
+                if child:IsA("GuiObject") and child.Name ~= "UIListLayout" then
+                    child:Destroy()
+                end
+            end
+        end
+        toast("已清空对话", COLORS.green, "✓")
+    end
+end)
+
+-- ============================================================
+-- 挂钩输入框
+-- ============================================================
+task.spawn(function()
+    local box
+    for _, d in ipairs(shell:GetDescendants()) do
+        if d:IsA("TextBox") and d.PlaceholderText:find("Codex") then
+            box = d break
+        end
+    end
+    if box then
+        box.FocusLost:Connect(function(enter)
+            if enter and box.Text ~= "" then
+                pushCommand(box.Text)
+                refreshHistory()
+            end
+        end)
+    end
+end)
+
+toast("扩展已加载 · 🔑 改 API", COLORS.green, "✓")
